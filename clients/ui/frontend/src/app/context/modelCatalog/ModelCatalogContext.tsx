@@ -78,6 +78,8 @@ type ModelCatalogExtension = {
   ) => string | number | string[] | undefined;
   sortBy: ModelCatalogSortOption | null;
   setSortBy: (sortBy: ModelCatalogSortOption | null) => void;
+  emptyCategoryLabels: Set<string>;
+  reportCategoryEmpty: (label: string, isEmpty: boolean) => void;
 };
 
 export type ModelCatalogContextType = CatalogContextValue<CatalogFilterOptionsList> &
@@ -102,14 +104,11 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
     React.useState(false);
   const [lastViewedModelName, setLastViewedModelName] = React.useState<string | null>(null);
   const [sortBy, setSortBy] = React.useState<ModelCatalogSortOption | null>(null);
+  const { emptyCategoryLabels, reportCategoryEmpty } = useEmptyCategoryTracking();
 
   const location = useLocation();
   const isOnDetailsPage = location.pathname.includes(ModelDetailsTab.PERFORMANCE_INSIGHTS);
 
-  /**
-   * Applies filter values from a named query to the filter state.
-   * Uses getDefaultFiltersFromNamedQuery to parse the namedQuery and applyFilterValue to set each filter.
-   */
   const applyNamedQueryDefaults = React.useCallback(
     (namedQuery: NamedQuery) => {
       const defaults = getDefaultFiltersFromNamedQuery(filterOptions, namedQuery);
@@ -120,20 +119,12 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
     [baseSetFilterData, filterOptions],
   );
 
-  /**
-   * Resets performance filters to their default values from namedQueries.
-   * Performance filters should always have values (defaults when not explicitly set).
-   * This is the single function for "clearing" or "resetting" performance filters.
-   */
   const resetPerformanceFiltersToDefaults = React.useCallback(() => {
-    // First, clear ALL latency filters (only one should be active at a time)
-    // This ensures any non-default latency filter is removed before applying defaults
     ALL_LATENCY_FILTER_KEYS.forEach((latencyKey) => {
       baseSetFilterData(latencyKey, undefined);
     });
     baseSetFilterData(ModelCatalogStringFilterKey.HARDWARE_CONFIGURATION, []);
 
-    // Then apply all defaults from namedQueries
     const defaultQuery = filterOptions?.namedQueries?.[DEFAULT_PERFORMANCE_FILTERS_QUERY_NAME];
     if (defaultQuery) {
       applyNamedQueryDefaults(defaultQuery);
@@ -157,9 +148,6 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
     baseSetFilterData(ModelCatalogStringFilterKey.VALIDATED_CONFIGURATION, []);
   }, [baseSetFilterData]);
 
-  /**
-   * Clears all filters: basic filters to empty, performance filters to defaults.
-   */
   const clearAllFilters = React.useCallback(() => {
     clearBasicFilters();
     resetPerformanceFiltersToDefaults();
@@ -168,12 +156,8 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
   const setPerformanceViewEnabled = React.useCallback(
     (enabled: boolean) => {
       setBasePerformanceViewEnabled(enabled);
-      // Performance filters always have values (defaults).
-      // When toggle changes, ensure defaults are applied.
-      // When toggle is OFF, filters are just not passed in API calls or shown as chips.
       resetPerformanceFiltersToDefaults();
 
-      // Update sort to default for the new toggle state, preserving user selection if it doesn't match the opposite default
       const defaultSort = getEffectiveSortBy(null, enabled);
       const oppositeDefault = getEffectiveSortBy(null, !enabled);
       setSortBy((currentSortBy) => {
@@ -187,36 +171,24 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
     [resetPerformanceFiltersToDefaults],
   );
 
-  /**
-   * Resets a single performance filter to its default value from namedQueries.
-   * Used when clicking the undo button on individual performance filter chips.
-   *
-   * For latency filters: Only one latency filter can be active at a time.
-   * When closing any latency chip, we clear ALL latency filters and apply the DEFAULT latency filter.
-   * This ensures proper reset behavior (e.g., closing ITL chip resets to the default TTFT filter).
-   */
   const resetSinglePerformanceFilterToDefault = React.useCallback(
     (filterKey: keyof ModelCatalogFilterStates) => {
       if (isLatencyFilterKey(filterKey)) {
-        // For latency filters: clear ALL latency filters first
         ALL_LATENCY_FILTER_KEYS.forEach((latencyKey) => {
           baseSetFilterData(latencyKey, undefined);
         });
 
-        // Then apply the default latency filter (which may be a different key, e.g., TTFT when closing ITL)
         const defaultQuery = filterOptions?.namedQueries?.[DEFAULT_PERFORMANCE_FILTERS_QUERY_NAME];
         if (defaultQuery) {
-          // Find the default latency filter from namedQueries
           for (const latencyKey of ALL_LATENCY_FILTER_KEYS) {
             const { hasDefault, value } = getSingleFilterDefault(filterOptions, latencyKey);
             if (hasDefault && value !== undefined) {
               applyFilterValue(baseSetFilterData, latencyKey, value);
-              break; // Only apply the first (and should be only) default latency filter
+              break;
             }
           }
         }
       } else {
-        // Non-latency filters: just reset to default
         const { value } = getSingleFilterDefault(filterOptions, filterKey);
         applyFilterValue(baseSetFilterData, filterKey, value);
       }
@@ -228,10 +200,6 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
     [filterOptions, baseSetFilterData, isOnDetailsPage],
   );
 
-  /**
-   * Gets the default value for a performance filter from namedQueries.
-   * Wrapper around the utility function that provides filterOptions from context.
-   */
   const getDefaultValueForPerformanceFilter = React.useCallback(
     (filterKey: keyof ModelCatalogFilterStates): string | number | string[] | undefined => {
       const { value } = getSingleFilterDefault(filterOptions, filterKey);
@@ -321,6 +289,8 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
       getPerformanceFilterDefaultValue: getDefaultValueForPerformanceFilter,
       sortBy,
       setSortBy,
+      emptyCategoryLabels,
+      reportCategoryEmpty,
     }),
     [
       selectedSource,
@@ -337,6 +307,9 @@ function useModelCatalogSetup(providerState: CatalogProviderState) {
       resetSinglePerformanceFilterToDefault,
       getDefaultValueForPerformanceFilter,
       sortBy,
+      setSortBy,
+      emptyCategoryLabels,
+      reportCategoryEmpty,
     ],
   );
 
